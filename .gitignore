@@ -1,22 +1,26 @@
-# Python cache
+# Ignore Python cache and venv
 __pycache__/
 *.pyc
-
-# Virtual environment
+*.pyo
+*.pyd
 venv/
+env/
 
-# Local config/secrets
+# Ignore local config and secrets
 .env
+config.json
 state.json
-*.b64
+state.zip
+save_state.py
+log.txt
 
-# Logs & data
+# Ignore VSCode/IDE files
+.vscode/
+.idea/
+
+# Ignore screenshots and temp files
+*.png
+*.jpg
+*.jpeg
 *.log
-price_log.csv
-
-# Screenshots & artifacts
-screenshots/
-
-# System files
-.DS_Store
-Thumbs.db
+*.tmp

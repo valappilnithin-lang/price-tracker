@@ -1,3 +1,0 @@
-Tracker script started...
-Checking: SanDisk 32GB Pen Drive
-Raw fetched price = None
