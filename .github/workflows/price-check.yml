@@ -25,7 +25,7 @@ jobs:
           python -m playwright install --with-deps
 
       - name: Restore state.json from secret
-        if: ${{ secrets.STATE_B64 != '' }}
+        if: ${{ secrets.STATE_B64 }}
         run: echo "${{ secrets.STATE_B64 }}" | base64 --decode > state.json
         shell: bash
 
