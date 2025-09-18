@@ -1,0 +1,44 @@
+name: Price Check
+
+on:
+  schedule:
+    - cron: "0 6,18 * * *"   # runs twice daily at 06:00 and 18:00 UTC
+  workflow_dispatch:          # allow manual trigger
+
+jobs:
+  check-prices:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright
+          python -m playwright install --with-deps
+
+      - name: Restore state.json from secret
+        if: ${{ secrets.STATE_B64 != '' }}
+        run: echo "${{ secrets.STATE_B64 }}" | base64 --decode > state.json
+        shell: bash
+
+      - name: Run tracker
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_HEADLESS: "true"
+        run: python tracker.py run
+
+      - name: Upload screenshots (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
