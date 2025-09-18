@@ -2,7 +2,7 @@ name: Price Check
 
 on:
   schedule:
-    - cron: "0 6,18 * * *"   # runs twice daily at 06:00 and 18:00 UTC
+    - cron: "0 */5 * * *"   # runs every 5 hours
   workflow_dispatch:          # allow manual trigger
 
 jobs:
