@@ -32,7 +32,14 @@ jobs:
         run: echo "${{ secrets.STATE_B64 }}" | base64 --decode > state.json
         shell: bash
 
+      - name: Restore config.json from secret
+        run: echo "${{ secrets.CONFIG_JSON_B64 }}" | base64 --decode > config.json
+        shell: bash
+
       - name: Run tracker
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python tracker.py
 
       - name: Upload screenshots (for debugging)

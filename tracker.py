@@ -1,119 +1,95 @@
 import os
 import json
-import csv
-from datetime import datetime
+import asyncio
+import logging
 import requests
-from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 
-# Load environment variables
-load_dotenv()
+# --- Logging setup ---
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="[%(levelname)s] %(message)s"
+)
 
-# Telegram config
+# --- Secrets from environment ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+CHAT_ID = os.getenv("CHAT_ID")
 
-LOG_FILE = "price_log.csv"
+if not TELEGRAM_TOKEN or not CHAT_ID:
+    logging.error("❌ TELEGRAM_TOKEN or CHAT_ID not set in environment!")
+    exit(1)
 
+# --- Load product list from config.json ---
+CONFIG_FILE = "config.json"
 
-def send_telegram(message):
-    """Send Telegram message via bot API"""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[WARN] Telegram config missing, skipping message")
-        return
+if not os.path.exists(CONFIG_FILE):
+    logging.error(f"❌ {CONFIG_FILE} not found! Did you decode it from secret?")
+    exit(1)
+
+with open(CONFIG_FILE, "r", encoding="utf-8") as f:
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        r = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message}, timeout=10)
-        print(f"[DEBUG] Telegram response {r.status_code}")
+        config = json.load(f)
+        products = config.get("products", [])
     except Exception as e:
-        print(f"[ERROR] Telegram send failed: {e}")
+        logging.error(f"❌ Failed to load {CONFIG_FILE}: {e}")
+        exit(1)
 
+# --- Telegram helper ---
+def send_telegram_message(message: str):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": message}
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code != 200:
+            logging.error(f"❌ Telegram send failed: {resp.text}")
+    except Exception as e:
+        logging.error(f"❌ Telegram exception: {e}")
 
-def fetch_price(page, url, product_id="unknown"):
-    """Open product page, save screenshot, and extract price"""
-    page.goto(url, timeout=60000)
+# --- Scraper ---
+async def check_prices():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context()
+        page = await context.new_page()
 
-    # Save screenshot
-    os.makedirs("screenshots", exist_ok=True)
-    screenshot_path = f"screenshots/{product_id}.png"
-    page.screenshot(path=screenshot_path)
-    print(f"[DEBUG] Screenshot saved: {screenshot_path}")
-
-    # Possible price selectors (Amazon + Flipkart)
-    selectors = [
-        "div._30jeq3._16Jk6d",                 # Flipkart
-        "span.a-price-whole",                  # Amazon normal
-        "span.a-price > span.a-offscreen",     # Amazon alternate
-        "span#priceblock_ourprice",            # Amazon old
-        "span#priceblock_dealprice",           # Amazon deal
-        "span#price_inside_buybox",            # Amazon buybox
-        "span.apexPriceToPay > span.a-offscreen"  # Amazon apex price
-    ]
-
-    for sel in selectors:
-        try:
-            elem = page.query_selector(sel)
-            if elem:
-                text = elem.inner_text().strip()
-                digits = "".join(c for c in text if c.isdigit())
-                if digits:
-                    return int(digits)
-        except Exception as e:
-            print(f"[DEBUG] Selector {sel} failed: {e}")
-
-    return None
-
-
-def run_tracker():
-    with open("config.json", "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-
-    with sync_playwright() as p:
-        headless_flag = os.getenv("RUN_HEADLESS", "true").lower() in ("1", "true", "yes")
-        browser = p.chromium.launch(
-            headless=headless_flag,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
-        )
-
-        # ✅ Use state.json if available (cookies-only version)
-        if os.path.exists("state.json"):
-            print("[DEBUG] Using saved state.json for session")
-            context = browser.new_context(storage_state="state.json")
-        else:
-            print("[DEBUG] No state.json found, using fresh context")
-            context = browser.new_context()
-
-        page = context.new_page()
-
-        for product in cfg.get("products", []):
-            pid = product["id"]
-            name = product["name"]
-            url = product["url"]
+        for product in products:
+            name = product.get("name", "Unknown")
+            url = product.get("url")
             target = product.get("target_price")
 
-            print(f"[CHECK] {name}")
-            price = fetch_price(page, url, pid)
-            print(f"[DEBUG] Price = {price}")
+            if not url:
+                logging.warning(f"⚠️ No URL for {name}, skipping.")
+                continue
 
-            ts = datetime.utcnow().isoformat()
+            logging.info(f"🔎 Checking: {name}")
+            try:
+                await page.goto(url, timeout=60000)
+                # Adjust selector depending on site (Amazon India example)
+                price_el = await page.locator("span.a-price-whole").first
+                price_text = await price_el.inner_text(timeout=30000)
 
-            # Log to CSV
-            with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow([ts, pid, name, price])
+                logging.debug(f"[DEBUG] Raw price text: {price_text}")
+                clean_price = int("".join([c for c in price_text if c.isdigit()]))
 
-            # Telegram messages
-            if price:
-                if target and price <= target:
-                    msg = f"📉 Price drop: {name} now ₹{price} (target {target})\n{url}"
-                    send_telegram(msg)
+                if clean_price:
+                    logging.info(f"💰 {name}: ₹{clean_price} (Target: ₹{target})")
+
+                    if target and clean_price <= target:
+                        send_telegram_message(
+                            f"✅ Price drop!\n{name}\nNow: ₹{clean_price}\nTarget: ₹{target}\n{url}"
+                        )
+                    else:
+                        logging.info(f"ℹ️ No alert for {name} yet.")
                 else:
-                    send_telegram(f"ℹ️ {name} current price: ₹{price} (target {target})")
-            else:
-                send_telegram(f"⚠️ Could not fetch price for {name}\n{url}")
+                    logging.warning(f"⚠️ Could not parse price for {name}")
 
-        browser.close()
+            except Exception as e:
+                logging.error(f"❌ Error checking {name}: {e}")
+
+        await browser.close()
 
 
 if __name__ == "__main__":
-    run_tracker()
+    logging.info("🚀 Tracker script started")
+    asyncio.run(check_prices())
+    logging.info("🏁 Tracker script finished")
