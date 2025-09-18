@@ -76,4 +76,5 @@ def run_tracker():
         browser.close()
 
 if __name__ == "__main__":
+    send_telegram("✅ Test message from GitHub Actions")
     run_tracker()
