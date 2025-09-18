@@ -45,7 +45,27 @@ def send_telegram_message(message: str):
     except Exception as e:
         logging.error(f"❌ Telegram exception: {e}")
 
-# --- Scraper ---
+# --- Price extractor ---
+async def get_price_text(page, url):
+    if "amazon" in url.lower():
+        selectors = ["span.a-price-whole", "span.a-offscreen"]
+    elif "flipkart" in url.lower():
+        selectors = ["div._30jeq3._16Jk6d"]
+    else:
+        selectors = []
+
+    for sel in selectors:
+        try:
+            price_el = page.locator(sel).first
+            price_text = await price_el.inner_text(timeout=5000)
+            if price_text:
+                logging.info(f"[DEBUG] Found price using selector: {sel}")
+                return price_text
+        except Exception as e:
+            logging.debug(f"[DEBUG] Selector {sel} failed: {e}")
+    return None
+
+# --- Main loop ---
 async def check_prices():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -64,30 +84,28 @@ async def check_prices():
             logging.info(f"🔎 Checking: {name}")
             try:
                 await page.goto(url, timeout=60000)
-                # Adjust selector depending on site (Amazon India example)
-                price_el = page.locator("span.a-price-whole").first
-                price_text = await price_el.inner_text(timeout=30000)
+                price_text = await get_price_text(page, url)
+
+                if not price_text:
+                    logging.warning(f"⚠️ Could not fetch price for {name}")
+                    continue
 
                 logging.debug(f"[DEBUG] Raw price text: {price_text}")
                 clean_price = int("".join([c for c in price_text if c.isdigit()]))
 
-                if clean_price:
-                    logging.info(f"💰 {name}: ₹{clean_price} (Target: ₹{target})")
+                logging.info(f"💰 {name}: ₹{clean_price} (Target: ₹{target})")
 
-                    if target and clean_price <= target:
-                        send_telegram_message(
-                            f"✅ Price drop!\n{name}\nNow: ₹{clean_price}\nTarget: ₹{target}\n{url}"
-                        )
-                    else:
-                        logging.info(f"ℹ️ No alert for {name} yet.")
+                if target and clean_price <= target:
+                    send_telegram_message(
+                        f"✅ Price drop!\n{name}\nNow: ₹{clean_price}\nTarget: ₹{target}\n{url}"
+                    )
                 else:
-                    logging.warning(f"⚠️ Could not parse price for {name}")
+                    logging.info(f"ℹ️ No alert for {name} yet.")
 
             except Exception as e:
                 logging.error(f"❌ Error checking {name}: {e}")
 
         await browser.close()
-
 
 if __name__ == "__main__":
     logging.info("🚀 Tracker script started")
