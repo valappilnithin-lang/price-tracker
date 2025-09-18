@@ -1,0 +1,10 @@
+{
+  "products": [
+    {
+      "id": "testusb",
+      "name": "SanDisk 32GB Pen Drive",
+      "url": "https://www.flipkart.com/apple-airpods-4-wireless-earbuds-active-noise-cancellation-adaptive-audio-bluetooth/p/itm8fa3b69c4f879?pid=ACCH4JE2BAJH75N3&lid=LSTACCH4JE2BAJH75N35NL6RG&marketplace=FLIPKART&q=apple+airpod+wireless&store=0pm%2Ffcn%2F821&srno=s_1_2&otracker=search&otracker1=search&fm=Search&iid=965d94dc-af28-4aae-9b10-227bf193bccd.ACCH4JE2BAJH75N3.SEARCH&ppt=sp&ppn=sp&ssid=pddec2ichs0000001758172079885&qH=5276552bba319ee2",
+      "target_price": 20000
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+
+# Local config/secrets
+.env
+state.json
+*.b64
+
+# Logs & data
+*.log
+price_log.csv
+
+# Screenshots & artifacts
+screenshots/
+
+# System files
+.DS_Store
+Thumbs.db
