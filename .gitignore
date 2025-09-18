@@ -13,6 +13,8 @@ state.json
 state.zip
 save_state.py
 log.txt
+config_b64.txt
+config_b64.txt4
 
 # Ignore VSCode/IDE files
 .vscode/
@@ -24,3 +26,6 @@ log.txt
 *.jpeg
 *.log
 *.tmp
+
+# Ignore test clones
+price-tracker-clean/
