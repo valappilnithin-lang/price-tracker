@@ -6,10 +6,10 @@ import requests
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-# Load environment variables (for local runs)
+# Load environment variables
 load_dotenv()
 
-# Secrets from environment
+# Telegram config
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -33,18 +33,21 @@ def fetch_price(page, url, product_id="unknown"):
     """Open product page, save screenshot, and extract price"""
     page.goto(url, timeout=60000)
 
-    # save screenshot every run for debugging
+    # Save screenshot
     os.makedirs("screenshots", exist_ok=True)
     screenshot_path = f"screenshots/{product_id}.png"
     page.screenshot(path=screenshot_path)
     print(f"[DEBUG] Screenshot saved: {screenshot_path}")
 
+    # Possible price selectors (Amazon + Flipkart)
     selectors = [
-        "div._30jeq3._16Jk6d",              # Flipkart
-        "span.a-price-whole",               # Amazon (normal)
-        "span.a-price > span.a-offscreen",  # Amazon (alternate)
-        "span#priceblock_ourprice",         # Amazon (old)
-        "span#priceblock_dealprice"         # Amazon (deal)
+        "div._30jeq3._16Jk6d",                 # Flipkart
+        "span.a-price-whole",                  # Amazon normal
+        "span.a-price > span.a-offscreen",     # Amazon alternate
+        "span#priceblock_ourprice",            # Amazon old
+        "span#priceblock_dealprice",           # Amazon deal
+        "span#price_inside_buybox",            # Amazon buybox
+        "span.apexPriceToPay > span.a-offscreen"  # Amazon apex price
     ]
 
     for sel in selectors:
@@ -66,13 +69,21 @@ def run_tracker():
         cfg = json.load(f)
 
     with sync_playwright() as p:
-        # Decide headless mode from env
         headless_flag = os.getenv("RUN_HEADLESS", "true").lower() in ("1", "true", "yes")
         browser = p.chromium.launch(
             headless=headless_flag,
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
         )
-        page = browser.new_page()
+
+        # ✅ Use state.json if available (cookies-only version)
+        if os.path.exists("state.json"):
+            print("[DEBUG] Using saved state.json for session")
+            context = browser.new_context(storage_state="state.json")
+        else:
+            print("[DEBUG] No state.json found, using fresh context")
+            context = browser.new_context()
+
+        page = context.new_page()
 
         for product in cfg.get("products", []):
             pid = product["id"]
@@ -86,17 +97,17 @@ def run_tracker():
 
             ts = datetime.utcnow().isoformat()
 
-            # log to CSV even if None
+            # Log to CSV
             with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow([ts, pid, name, price])
 
+            # Telegram messages
             if price:
                 if target and price <= target:
                     msg = f"📉 Price drop: {name} now ₹{price} (target {target})\n{url}"
                     send_telegram(msg)
                 else:
-                    # Debug message: current price
                     send_telegram(f"ℹ️ {name} current price: ₹{price} (target {target})")
             else:
                 send_telegram(f"⚠️ Could not fetch price for {name}\n{url}")
