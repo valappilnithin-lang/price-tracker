@@ -65,7 +65,7 @@ async def check_prices():
             try:
                 await page.goto(url, timeout=60000)
                 # Adjust selector depending on site (Amazon India example)
-                price_el = await page.locator("span.a-price-whole").first
+                price_el = page.locator("span.a-price-whole").first
                 price_text = await price_el.inner_text(timeout=30000)
 
                 logging.debug(f"[DEBUG] Raw price text: {price_text}")
