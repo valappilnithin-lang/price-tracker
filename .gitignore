@@ -28,4 +28,4 @@ config_b64.txt4
 *.tmp
 
 # Ignore test clones
-price-tracker-clean/
+price-tracker-clean/"flipkart_page.html" 
