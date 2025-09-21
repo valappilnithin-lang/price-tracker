@@ -2,8 +2,8 @@ name: Price Tracker
 
 on:
   schedule:
-    - cron: "0 */5 * * *"    # every 5 hours (UTC)
-  workflow_dispatch:          # allow manual trigger
+    - cron: "0 */5 * * *"  # every 5 hours (UTC)
+  workflow_dispatch:
 
 jobs:
   check-prices:
@@ -13,14 +13,13 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Optional random delay (0–10 minutes)
       - name: Random sleep
         run: sleep $((RANDOM % 600))
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
@@ -29,12 +28,14 @@ jobs:
           playwright install --with-deps
 
       - name: Restore state.json from secret
-        run: echo "${{ secrets.STATE_B64 }}" | base64 --decode > state.json
-        shell: bash
+        shell: pwsh
+        run: |
+          [System.IO.File]::WriteAllBytes("state.json", [Convert]::FromBase64String("$Env:STATE_B64"))
 
       - name: Restore config.json from secret
-        run: echo "${{ secrets.CONFIG_JSON_B64 }}" | base64 --decode > config.json
-        shell: bash
+        shell: pwsh
+        run: |
+          [System.IO.File]::WriteAllBytes("config.json", [Convert]::FromBase64String("$Env:CONFIG_JSON_B64"))
 
       - name: Run tracker
         env:
