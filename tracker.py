@@ -1,113 +1,140 @@
-import os
-import json
 import asyncio
+import json
 import logging
+import os
 import requests
 from playwright.async_api import async_playwright
 
-# --- Logging setup ---
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="[%(levelname)s] %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# --- Secrets from environment ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-if not TELEGRAM_TOKEN or not CHAT_ID:
-    logging.error("❌ TELEGRAM_TOKEN or CHAT_ID not set in environment!")
-    exit(1)
+SESSION = os.getenv("SESSION")
+COOKIES = os.getenv("COOKIES")
 
-# --- Load product list from config.json ---
-CONFIG_FILE = "config.json"
 
-if not os.path.exists(CONFIG_FILE):
-    logging.error(f"❌ {CONFIG_FILE} not found! Did you decode it from secret?")
-    exit(1)
-
-with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-    try:
-        config = json.load(f)
-        products = config.get("products", [])
-    except Exception as e:
-        logging.error(f"❌ Failed to load {CONFIG_FILE}: {e}")
-        exit(1)
-
-# --- Telegram helper ---
+# --- Telegram sender ---
 def send_telegram_message(message: str):
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        logging.warning("⚠️ TELEGRAM_TOKEN or CHAT_ID not set, skipping Telegram")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
     try:
-        resp = requests.post(url, json=payload, timeout=10)
+        resp = requests.post(url, data={"chat_id": CHAT_ID, "text": message})
         if resp.status_code != 200:
-            logging.error(f"❌ Telegram send failed: {resp.text}")
+            logging.error(f"Telegram error: {resp.text}")
     except Exception as e:
-        logging.error(f"❌ Telegram exception: {e}")
+        logging.error(f"Telegram exception: {e}")
 
-# --- Price extractor ---
+
+# --- Extract price text ---
 async def get_price_text(page, url):
     if "amazon" in url.lower():
-        selectors = ["span.a-price-whole", "span.a-offscreen"]
-    elif "flipkart" in url.lower():
-        selectors = ["div._30jeq3._16Jk6d"]
-    else:
-        selectors = []
+        selectors = [
+            "span.a-price-whole",
+            "span.a-offscreen",
+            "span.priceBlockBuyingPriceString",
+            "span#priceblock_ourprice",
+            "span#priceblock_dealprice"
+        ]
+        for sel in selectors:
+            try:
+                await page.wait_for_selector(sel, timeout=6000)
+                price_el = page.locator(sel).first
+                text = await price_el.inner_text()
+                if text:
+                    # If whole+fraction both exist
+                    if sel == "span.a-price-whole":
+                        try:
+                            frac = await page.locator("span.a-price-fraction").first.inner_text(timeout=2000)
+                            text = f"₹{text}{frac}"
+                        except:
+                            text = f"₹{text}"
+                    logging.info(f"[DEBUG] Amazon price found via {sel}: {text}")
+                    return text.strip()
+            except Exception:
+                continue
 
-    for sel in selectors:
-        try:
-            price_el = page.locator(sel).first
-            price_text = await price_el.inner_text(timeout=5000)
-            if price_text:
-                logging.info(f"[DEBUG] Found price using selector: {sel}")
-                return price_text
-        except Exception as e:
-            logging.debug(f"[DEBUG] Selector {sel} failed: {e}")
+    elif "flipkart" in url.lower():
+        selectors = [
+            "div._30jeq3",
+            "div._16Jk6d",
+            "span._30jeq3",
+            "text=₹"
+        ]
+        for sel in selectors:
+            try:
+                await page.wait_for_selector(sel, timeout=6000)
+                price_el = page.locator(sel).first
+                text = await price_el.inner_text()
+                if text:
+                    logging.info(f"[DEBUG] Flipkart price found via {sel}: {text}")
+                    return text.strip()
+            except Exception:
+                continue
+
     return None
 
-# --- Main loop ---
-async def check_prices():
+
+# --- Core fetch ---
+async def get_price(url):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context()
-        page = await context.new_page()
 
-        for product in products:
-            name = product.get("name", "Unknown")
-            url = product.get("url")
-            target = product.get("target_price")
-
-            if not url:
-                logging.warning(f"⚠️ No URL for {name}, skipping.")
-                continue
-
-            logging.info(f"🔎 Checking: {name}")
+        # Add cookies from secrets if provided
+        if COOKIES:
             try:
-                await page.goto(url, timeout=60000)
-                price_text = await get_price_text(page, url)
-
-                if not price_text:
-                    logging.warning(f"⚠️ Could not fetch price for {name}")
-                    continue
-
-                logging.debug(f"[DEBUG] Raw price text: {price_text}")
-                clean_price = int("".join([c for c in price_text if c.isdigit()]))
-
-                logging.info(f"💰 {name}: ₹{clean_price} (Target: ₹{target})")
-
-                if target and clean_price <= target:
-                    send_telegram_message(
-                        f"✅ Price drop!\n{name}\nNow: ₹{clean_price}\nTarget: ₹{target}\n{url}"
-                    )
-                else:
-                    logging.info(f"ℹ️ No alert for {name} yet.")
-
+                cookies = json.loads(COOKIES)
+                await context.add_cookies(cookies)
+                logging.info("[INFO] Cookies loaded from secrets")
             except Exception as e:
-                logging.error(f"❌ Error checking {name}: {e}")
+                logging.warning(f"[WARN] Invalid cookies: {e}")
+
+        page = await context.new_page()
+        await page.set_extra_http_headers({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/120.0.0.0 Safari/537.36"
+        })
+
+        await page.goto(url, timeout=60000, wait_until="networkidle")
+
+        price_text = await get_price_text(page, url)
 
         await browser.close()
+        return price_text
+
+
+# --- Runner ---
+async def main():
+    try:
+        with open("config.json", "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        logging.error("❌ config.json not found")
+        return
+
+    for product in config.get("products", []):
+        url = product.get("url")
+        name = product.get("name")
+        target = product.get("target_price")
+
+        if not url:
+            continue
+
+        price_text = await get_price(url)
+
+        if price_text:
+            msg = f"✅ {name}: {price_text} (Target: {target})"
+            print(msg)
+            send_telegram_message(msg)
+        else:
+            msg = f"⚠️ Could not fetch price for {name}"
+            print(msg)
+            send_telegram_message(msg)
+
 
 if __name__ == "__main__":
-    logging.info("🚀 Tracker script started")
-    asyncio.run(check_prices())
-    logging.info("🏁 Tracker script finished")
+    asyncio.run(main())
